@@ -999,38 +999,26 @@ func getModel(fl *ast.File, str string) (definitionName string, m swagger.Schema
 	// Default all swagger schemas to object, if no other type is found
 	m.Type = astTypeObject
 
-	var localPkgs []*ast.Package
-	if fl == nil {
-		localPkgs = append(astPkgs)
-	} else {
-		localPkgs = make([]*ast.Package, 0)
-		parsePackageFromFile(&localPkgs, fl)
-	}
+	localPkgs := make([]*ast.Package, len(astPkgs))
+	copy(localPkgs, astPkgs)
+	parsePackageFromFile(&localPkgs, fl)
 
-	flList := make([]*ast.File, 0)
-	if fl != nil {
-		flList = append(flList, fl)
-	}
+L:
 	for _, pkg := range localPkgs {
 		if packageName == pkg.Name {
 			for _, fl := range pkg.Files {
-				flList = append(flList, fl)
-			}
-		}
-	}
+				for k, d := range fl.Scope.Objects {
+					if d.Kind == ast.Typ {
+						if k != objectname {
+							// Still searching for the right object
+							continue
+						}
+						parseObject(d, k, &m, &realTypes, fl, localPkgs, packageName)
 
-L:
-	for _, fl := range flList {
-		for k, d := range fl.Scope.Objects {
-			if d.Kind == ast.Typ {
-				if k != objectname {
-					// Still searching for the right object
-					continue
+						// When we've found the correct object, we can stop searching
+						break L
+					}
 				}
-				parseObject(d, k, &m, &realTypes, fl, localPkgs, packageName)
-
-				// When we've found the correct object, we can stop searching
-				break L
 			}
 		}
 	}
