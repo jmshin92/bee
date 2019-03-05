@@ -86,7 +86,6 @@ var basicTypes = map[string]string{
 	// builtin golang objects
 	"time.Time":       "string:datetime",
 	"json.RawMessage": "object:",
-	"interface":       "object:",
 }
 
 var stdlibObject = map[string]string{
@@ -1190,6 +1189,7 @@ func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]s
 					mp.Format = typeFormat[1]
 				} else if realType == astTypeMap {
 					typeFormat := strings.Split(sType, ":")
+					mp.Type = astTypeObject
 					mp.AdditionalProperties = &swagger.Propertie{
 						Type:   typeFormat[0],
 						Format: typeFormat[1],
@@ -1323,15 +1323,17 @@ func typeAnalyser(f *ast.Field) (isSlice bool, realType, swaggerType string) {
 		}
 		return false, basicType, astTypeObject
 	case *ast.MapType:
-		val := fmt.Sprintf("%v", t.Value)
+		var val string
 		switch t.Value.(type) {
 		case *ast.InterfaceType:
-			val = "interface"
+			val = "json.RawMessage"
+		default:
+			val = fmt.Sprintf("%v", t.Value)
 		}
 		if isBasicType(val) {
 			return false, astTypeMap, basicTypes[val]
 		}
-		return false, val, astTypeObject
+		return false, astTypeMap, astTypeObject
 	}
 	basicType := fmt.Sprint(f.Type)
 	if object, isStdLibObject := stdlibObject[basicType]; isStdLibObject {
