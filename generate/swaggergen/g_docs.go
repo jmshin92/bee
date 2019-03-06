@@ -662,7 +662,8 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 			} else if strings.HasPrefix(t, "@Title") {
 				opts.OperationID = controllerName + "." + strings.TrimSpace(t[len("@Title"):])
 			} else if strings.HasPrefix(t, "@Description") {
-				opts.Description += fmt.Sprintf("%s\n", strings.TrimSpace(t[len("@Description"):]))
+				desc := strings.TrimSpace(t[len("@Description"):])
+				opts.Description += fmt.Sprintf("%s\n", strings.Trim(desc, "\""))
 			} else if strings.HasPrefix(t, "@Summary") {
 				opts.Summary = strings.TrimSpace(t[len("@Summary"):])
 			} else if strings.HasPrefix(t, "@Success") {
@@ -774,16 +775,21 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 					}
 					setParamType(&para, typ, fl, pkgpath, controllerName)
 				}
+				var paramDesc string
 				switch len(p) {
 				case 5:
 					para.Required, _ = strconv.ParseBool(p[3])
-					para.Description = strings.Trim(p[4], `" `)
+					paramDesc = strings.Trim(p[4], `" `)
 				case 6:
 					para.Default = str2RealType(p[3], para.Type)
 					para.Required, _ = strconv.ParseBool(p[4])
-					para.Description = strings.Trim(p[5], `" `)
+					paramDesc = strings.Trim(p[5], `" `)
 				default:
-					para.Description = strings.Trim(p[3], `" `)
+					paramDesc = strings.Trim(p[3], `" `)
+				}
+				lines := strings.Split(paramDesc, `\n`)
+				for _, line := range lines {
+					para.Description = fmt.Sprintf("%s\n%s", para.Description, line)
 				}
 				opts.Parameters = append(opts.Parameters, para)
 			} else if strings.HasPrefix(t, "@Failure") {
