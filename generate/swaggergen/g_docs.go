@@ -284,7 +284,7 @@ func GenerateDocs(curpath string) {
 							}
 							version, params := analyseNewNamespace(v)
 							if rootapi.BasePath == "" && version != "" {
-								rootapi.BasePath = version
+								rootapi.BasePath = "" //version
 							}
 							for _, p := range params {
 								switch pp := p.(type) {
@@ -787,7 +787,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				default:
 					paramDesc = strings.Trim(p[3], `" `)
 				}
-				lines := strings.Split(paramDesc, `\n`)
+				lines := strings.Split(paramDesc, `\n\n`)
 				for _, line := range lines {
 					para.Description = fmt.Sprintf("%s\n%s", para.Description, line)
 				}
