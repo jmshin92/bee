@@ -176,7 +176,7 @@ func GenerateDocs(curpath string) {
 				} else if strings.HasPrefix(s, "@Title") {
 					rootapi.Infos.Title = strings.TrimSpace(s[len("@Title"):])
 				} else if strings.HasPrefix(s, "@Description") {
-					rootapi.Infos.Description += strings.TrimSpace(s[len("@Description"):])
+					rootapi.Infos.Description = strings.TrimSpace(s[len("@Description"):])
 				} else if strings.HasPrefix(s, "@TermsOfServiceUrl") {
 					rootapi.Infos.TermsOfService = strings.TrimSpace(s[len("@TermsOfServiceUrl"):])
 				} else if strings.HasPrefix(s, "@Contact") {
@@ -662,7 +662,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 			} else if strings.HasPrefix(t, "@Title") {
 				opts.OperationID = controllerName + "." + strings.TrimSpace(t[len("@Title"):])
 			} else if strings.HasPrefix(t, "@Description") {
-				opts.Description = strings.TrimSpace(t[len("@Description"):])
+				opts.Description += fmt.Sprintf("%s\n", strings.TrimSpace(t[len("@Description"):]))
 			} else if strings.HasPrefix(t, "@Summary") {
 				opts.Summary = strings.TrimSpace(t[len("@Summary"):])
 			} else if strings.HasPrefix(t, "@Success") {
