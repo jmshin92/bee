@@ -93,6 +93,16 @@ var stdlibObject = map[string]string{
 	"&{json RawMessage}": "json.RawMessage",
 }
 
+var httpMethods = map[string]bool{
+	"GET":     true,
+	"POST":    true,
+	"PUT":     true,
+	"PATCH":   true,
+	"DELETE":  true,
+	"HEAD":    true,
+	"OPTIONS": true,
+}
+
 func init() {
 	pkgCache = make(map[string]struct{})
 	controllerComments = make(map[string]string)
@@ -282,27 +292,8 @@ func GenerateDocs(curpath string) {
 							if !selOK || selExpr.Sel.Name != "NewNamespace" {
 								continue
 							}
-							version, params := analyseNewNamespace(v)
-							if rootapi.BasePath == "" && version != "" {
-								rootapi.BasePath = "" //version
-							}
-							for _, p := range params {
-								switch pp := p.(type) {
-								case *ast.CallExpr:
-									var controllerName string
-									if selname := pp.Fun.(*ast.SelectorExpr).Sel.String(); selname == "NSNamespace" {
-										traverseNameSpace(version, pp)
-									} else if selname == "NSInclude" {
-										controllerName = analyseNSInclude("", pp)
-										if v, ok := controllerComments[controllerName]; ok {
-											rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-												Name:        controllerName, // if the NSInclude has no prefix, we use the controllername as the tag
-												Description: v,
-											})
-										}
-									}
-								}
-							}
+
+							traverseNameSpace("", v)
 						}
 
 					}
@@ -372,6 +363,10 @@ func getPackageRealName(pkgRealPath string) string {
 
 func traverseNameSpace(baseURL string, pp *ast.CallExpr) {
 	s, params := analyseNewNamespace(pp)
+	if rootapi.BasePath == "" && baseURL == "" {
+		rootapi.BasePath = s
+		s = ""
+	}
 	for _, sp := range params {
 		switch pp := sp.(type) {
 		case *ast.CallExpr:
@@ -384,7 +379,7 @@ func traverseNameSpace(baseURL string, pp *ast.CallExpr) {
 				controllerName := analyseNSRouter(baseURL+s, rootpath, pp)
 				if v, ok := controllerComments[controllerName]; ok {
 					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-						Name:        strings.Trim(s, "/"),
+						Name:        strings.Trim(baseURL + s, "/"),
 						Description: v,
 					})
 				}
@@ -416,18 +411,18 @@ func analyseNewNamespace(ce *ast.CallExpr) (first string, others []ast.Expr) {
 	return
 }
 
-func analyseController(x *ast.SelectorExpr, baseurl, rootpath string) string {
+func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
 	cname := ""
 	if v, ok := importlist[fmt.Sprint(x.X)]; ok {
 		cname = v + x.Sel.Name
 	}
 	if apis, ok := controllerList[cname]; ok {
 		for rt, item := range apis {
-			if rootpath != "" {
+			if routeurl != "" {
 				if rt != "" {
 					continue
 				}
-				rt = rootpath
+				rt = routeurl
 			}
 			tag := cname
 			if baseurl != "" {
@@ -474,8 +469,7 @@ func analyseNSRouter(baseurl, rootpath string, ce *ast.CallExpr) string {
 	} else {
 		beeLogger.Log.Warnf("Couldn't determine type\n")
 	}
-
-	return analyseController(x, baseurl, rootpath)
+	return appendController(x, baseurl, rootpath)
 }
 
 func analyseNSInclude(baseurl string, ce *ast.CallExpr) string {
@@ -497,7 +491,7 @@ func analyseNSInclude(baseurl string, ce *ast.CallExpr) string {
 			continue
 		}
 
-		cname = analyseController(x, baseurl, "")
+		cname = appendController(x, baseurl, "")
 	}
 	return cname
 }
@@ -615,8 +609,7 @@ func peekNextSplitString(ss string) (s string, spacePos int) {
 // parse the func comments
 func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath string) error {
 	var routerPath string
-	var routerMethod string
-	var funcMethod string
+	var HTTPMethod string
 	opts := swagger.Operation{
 		Responses: make(map[string]swagger.Response),
 	}
@@ -624,22 +617,8 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 	comments := f.Doc
 	funcParamMap := buildParamMap(f.Type.Params)
 
-	switch fn := strings.ToUpper(funcName); fn {
-	case "GET":
-		fallthrough
-	case "POST":
-		fallthrough
-	case "PUT":
-		fallthrough
-	case "PATCH":
-		fallthrough
-	case "DELETE":
-		fallthrough
-	case "HEAD":
-		fallthrough
-	case "OPTIONS":
-		funcMethod = fn
-		routerMethod = fn
+	if fn := strings.ToUpper(funcName); httpMethods[fn] {
+		HTTPMethod = fn
 	}
 
 	//TODO: resultMap := buildParamMap(f.Type.Results)
@@ -655,9 +634,9 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				routerPath = e1[0]
 				if len(e1) == 2 && e1[1] != "" {
 					e1 = strings.SplitN(e1[1], " ", 2)
-					routerMethod = strings.ToUpper(strings.Trim(e1[0], "[]"))
+					HTTPMethod = strings.ToUpper(strings.Trim(e1[0], "[]"))
 				} else {
-					routerMethod = "GET"
+					HTTPMethod = "GET"
 				}
 			} else if strings.HasPrefix(t, "@Title") {
 				opts.OperationID = controllerName + "." + strings.TrimSpace(t[len("@Title"):])
@@ -841,7 +820,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 		}
 	}
 
-	if routerMethod != "" {
+	if HTTPMethod != "" {
 		//Go over function parameters which were not mapped and create swagger params for them
 		for name, typ := range funcParamMap {
 			para := swagger.Parameter{}
@@ -866,7 +845,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 			controllerList[pkgpath+controllerName] = make(map[string]*swagger.Item)
 			item = &swagger.Item{}
 		}
-		for _, hm := range strings.Split(routerMethod, ",") {
+		for _, hm := range strings.Split(HTTPMethod, ",") {
 			switch hm {
 			case "GET":
 				item.Get = &opts
@@ -885,9 +864,6 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 			}
 		}
 		controllerList[pkgpath+controllerName][routerPath] = item
-		if funcMethod != "" {
-			controllerList[pkgpath+controllerName][""] = item
-		}
 	}
 	return nil
 }
