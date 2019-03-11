@@ -642,7 +642,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				opts.OperationID = controllerName + "." + strings.TrimSpace(t[len("@Title"):])
 			} else if strings.HasPrefix(t, "@Description") {
 				desc := strings.TrimSpace(t[len("@Description"):])
-				opts.Description += fmt.Sprintf("%s\n", strings.Trim(desc, "\""))
+				opts.Description += fmt.Sprintf("%s\n\n", strings.Trim(desc, "\""))
 			} else if strings.HasPrefix(t, "@Summary") {
 				opts.Summary = strings.TrimSpace(t[len("@Summary"):])
 			} else if strings.HasPrefix(t, "@Success") {
@@ -766,7 +766,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				default:
 					paramDesc = strings.Trim(p[3], `" `)
 				}
-				lines := strings.Split(paramDesc, `\n\n`)
+				lines := strings.Split(paramDesc, `\n`)
 				for _, line := range lines {
 					para.Description = fmt.Sprintf("%s\n%s", para.Description, line)
 				}
