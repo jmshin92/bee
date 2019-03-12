@@ -375,11 +375,11 @@ func traverseNameSpace(baseURL string, pp *ast.CallExpr) {
 			case "NSNamespace":
 				traverseNameSpace(baseURL+s, pp)
 			case "NSRouter":
-				rootpath := strings.Trim(pp.Args[0].(*ast.BasicLit).Value, "\"")
-				controllerName := analyseNSRouter(baseURL+s, rootpath, pp)
+				routeURL := strings.Trim(pp.Args[0].(*ast.BasicLit).Value, "\"")
+				controllerName := analyseNSRouter(baseURL+s, routeURL, pp)
 				if v, ok := controllerComments[controllerName]; ok {
 					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-						Name:        strings.Trim(baseURL + s, "/"),
+						Name:        strings.Trim(baseURL+s+routeURL, "/"),
 						Description: v,
 					})
 				}
@@ -387,7 +387,7 @@ func traverseNameSpace(baseURL string, pp *ast.CallExpr) {
 				controllerName := analyseNSInclude(baseURL+s, pp)
 				if v, ok := controllerComments[controllerName]; ok {
 					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-						Name:        strings.Trim(s, "/"),
+						Name:        strings.Trim(baseURL+s, "/"),
 						Description: v,
 					})
 				}
@@ -411,24 +411,19 @@ func analyseNewNamespace(ce *ast.CallExpr) (first string, others []ast.Expr) {
 	return
 }
 
-func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
+func appendController(x *ast.SelectorExpr, baseurl string) string {
 	cname := ""
 	if v, ok := importlist[fmt.Sprint(x.X)]; ok {
 		cname = v + x.Sel.Name
 	}
 	if apis, ok := controllerList[cname]; ok {
 		for rt, item := range apis {
-			if routeurl != "" {
-				if rt != "" {
-					continue
-				}
-				rt = routeurl
-			}
 			tag := cname
-			if baseurl != "" {
+			if baseurl+rt != "" {
 				rt = baseurl + strings.TrimRight(rt, "/")
 				tag = strings.Trim(baseurl, "/")
 			}
+
 			if item.Get != nil {
 				item.Get.Tags = []string{tag}
 			}
@@ -469,7 +464,7 @@ func analyseNSRouter(baseurl, rootpath string, ce *ast.CallExpr) string {
 	} else {
 		beeLogger.Log.Warnf("Couldn't determine type\n")
 	}
-	return appendController(x, baseurl, rootpath)
+	return appendController(x, baseurl+rootpath)
 }
 
 func analyseNSInclude(baseurl string, ce *ast.CallExpr) string {
@@ -491,7 +486,7 @@ func analyseNSInclude(baseurl string, ce *ast.CallExpr) string {
 			continue
 		}
 
-		cname = appendController(x, baseurl, "")
+		cname = appendController(x, baseurl)
 	}
 	return cname
 }
