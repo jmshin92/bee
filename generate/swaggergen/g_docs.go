@@ -420,7 +420,7 @@ func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
 		for rt, item := range apis {
 			tag := cname
 			if baseurl+routeurl != "" {
-				rt = baseurl + routeurl + strings.TrimRight(rt, "/")
+				rt = baseurl + routeurl + rt
 				tag = strings.Trim(baseurl, "/")
 			}
 
