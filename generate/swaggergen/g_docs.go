@@ -379,7 +379,7 @@ func traverseNameSpace(baseURL string, pp *ast.CallExpr) {
 				controllerName := analyseNSRouter(baseURL+s, routeURL, pp)
 				if v, ok := controllerComments[controllerName]; ok {
 					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-						Name:        strings.Trim(baseURL+s+routeURL, "/"),
+						Name:        strings.Trim(baseURL+s, "/"),
 						Description: v,
 					})
 				}
@@ -411,7 +411,7 @@ func analyseNewNamespace(ce *ast.CallExpr) (first string, others []ast.Expr) {
 	return
 }
 
-func appendController(x *ast.SelectorExpr, baseurl string) string {
+func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
 	cname := ""
 	if v, ok := importlist[fmt.Sprint(x.X)]; ok {
 		cname = v + x.Sel.Name
@@ -419,8 +419,8 @@ func appendController(x *ast.SelectorExpr, baseurl string) string {
 	if apis, ok := controllerList[cname]; ok {
 		for rt, item := range apis {
 			tag := cname
-			if baseurl+rt != "" {
-				rt = baseurl + strings.TrimRight(rt, "/")
+			if baseurl+routeurl != "" {
+				rt = baseurl + routeurl + strings.TrimRight(rt, "/")
 				tag = strings.Trim(baseurl, "/")
 			}
 
@@ -455,7 +455,7 @@ func appendController(x *ast.SelectorExpr, baseurl string) string {
 	return cname
 }
 
-func analyseNSRouter(baseurl, rootpath string, ce *ast.CallExpr) string {
+func analyseNSRouter(baseurl, routerurl string, ce *ast.CallExpr) string {
 	var x *ast.SelectorExpr
 	var p interface{} = ce.Args[1]
 
@@ -464,7 +464,7 @@ func analyseNSRouter(baseurl, rootpath string, ce *ast.CallExpr) string {
 	} else {
 		beeLogger.Log.Warnf("Couldn't determine type\n")
 	}
-	return appendController(x, baseurl+rootpath)
+	return appendController(x, baseurl, routerurl)
 }
 
 func analyseNSInclude(baseurl string, ce *ast.CallExpr) string {
@@ -486,7 +486,7 @@ func analyseNSInclude(baseurl string, ce *ast.CallExpr) string {
 			continue
 		}
 
-		cname = appendController(x, baseurl)
+		cname = appendController(x, baseurl, "")
 	}
 	return cname
 }
@@ -1161,7 +1161,9 @@ func normalizeTypeName(packageName, typename string) string {
 		typename = strings.Replace(typename, "{", "", -1)
 		typename = strings.Replace(typename, "}", "", -1)
 	} else {
-		typename = packageName + "." + typename
+		if len(strings.Split(typename, ".")) == 1 {
+			typename = packageName + "." + typename
+		}
 	}
 	return typename
 }
@@ -1371,7 +1373,7 @@ func typeAnalyser(f *ast.Field) (isSlice bool, realType, swaggerType string) {
 	case *ast.InterfaceType:
 		// Interface as Map
 		val := "json.RawMessage"
-		return false, astTypeMap, basicTypes[val]
+		return false, val, astTypeObject
 	}
 	basicType := fmt.Sprint(f.Type)
 	if object, isStdLibObject := stdlibObject[basicType]; isStdLibObject {
