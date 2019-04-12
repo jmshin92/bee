@@ -393,8 +393,8 @@ func findBaseNamespace(url string, pp *ast.CallExpr) (string, *ast.CallExpr) {
 
 func traverseNameSpace(baseURL string, nsExpr *ast.CallExpr) {
 	s, params := analyseNewNamespace(nsExpr)
-	if len(baseURL) == 0 {
-		baseURL = s
+	if len(baseURL) == 0 && len(rootapi.BasePath) == 0 {
+		rootapi.BasePath = s
 	}
 
 	for _, sp := range params {
@@ -406,11 +406,15 @@ func traverseNameSpace(baseURL string, nsExpr *ast.CallExpr) {
 				url := strings.Trim(pp.Args[0].(*ast.BasicLit).Value, `"`)
 				traverseNameSpace(baseURL+url, pp)
 			case "NSRouter":
-				routeURL := strings.Trim(pp.Args[0].(*ast.BasicLit).Value, "\"")
+				routeURL := strings.TrimRight(strings.Trim(pp.Args[0].(*ast.BasicLit).Value, "\""), "/")
 				controllerName := analyseNSRouter(baseURL, routeURL, pp)
 				if v, ok := controllerComments[controllerName]; ok {
+					tag := strings.Trim(baseURL, "/")
+					if len(tag) == 0 {
+						tag = "/"
+					}
 					rootapi.Tags = append(rootapi.Tags, Tag{
-						Name:        strings.Trim(baseURL+routeURL, "/"),
+						Name:        tag,
 						Description: v,
 					})
 				}
@@ -452,7 +456,10 @@ func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
 			tag := cname
 			if baseurl+routeurl != "" {
 				rt = baseurl + routeurl + rt
-				tag = strings.Trim(baseurl+routeurl, "/")
+				tag = strings.Trim(baseurl, "/")
+				if len(tag) == 0 {
+					tag = "/"
+				}
 			}
 
 			if item.Get != nil {
