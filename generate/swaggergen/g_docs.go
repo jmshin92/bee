@@ -32,11 +32,11 @@ import (
 	"strings"
 	"unicode"
 
-	yaml "gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v2"
 
-	"github.com/astaxie/beego/swagger"
 	"github.com/astaxie/beego/utils"
-	beeLogger "github.com/beego/bee/logger"
+	"github.com/beego/bee/generate/swaggergen/swagger"
+	"github.com/beego/bee/logger"
 	bu "github.com/beego/bee/utils"
 )
 
@@ -211,6 +211,8 @@ func GenerateDocs(curpath string) {
 					rootapi.Schemes = strings.Split(strings.TrimSpace(s[len("@Schemes"):]), ",")
 				} else if strings.HasPrefix(s, "@Host") {
 					rootapi.Host = strings.TrimSpace(s[len("@Host"):])
+				} else if strings.HasPrefix(s, "@Base") {
+					rootapi.BasePath = strings.TrimSpace(s[len("@Base"):])
 				} else if strings.HasPrefix(s, "@SecurityDefinition") {
 					if len(rootapi.SecurityDefinitions) == 0 {
 						rootapi.SecurityDefinitions = make(map[string]swagger.Security)
@@ -292,8 +294,11 @@ func GenerateDocs(curpath string) {
 							if !selOK || selExpr.Sel.Name != "NewNamespace" {
 								continue
 							}
-
-							traverseNameSpace("", v)
+							baseurl := ""
+							if len(rootapi.BasePath) > 0 {
+								_, v = findBaseNamespace("", v)
+							}
+							traverseNameSpace(baseurl, v)
 						}
 
 					}
@@ -361,33 +366,61 @@ func getPackageRealName(pkgRealPath string) string {
 	return pkgRealName
 }
 
-func traverseNameSpace(baseURL string, pp *ast.CallExpr) {
+func findBaseNamespace(url string, pp *ast.CallExpr) (string, *ast.CallExpr) {
 	s, params := analyseNewNamespace(pp)
-	if rootapi.BasePath == "" && baseURL == "" {
-		rootapi.BasePath = s
-		s = ""
+	curUrl := strings.Trim(url+s, "/")
+	basePath := strings.Trim(rootapi.BasePath, "/")
+
+	if basePath == curUrl {
+		return url, pp
+	} else if strings.HasPrefix(basePath, curUrl) {
+		for _, sp := range params {
+			switch pp := sp.(type) {
+			case *ast.CallExpr:
+				selName := pp.Fun.(*ast.SelectorExpr).Sel.String()
+				if selName == "NSNamespace" {
+					if url, node := findBaseNamespace(url+s, pp); node != nil {
+						return url, node
+					}
+				}
+			}
+		}
 	}
+	return "", nil
+}
+
+func traverseNameSpace(baseURL string, nsExpr *ast.CallExpr) {
+	s, params := analyseNewNamespace(nsExpr)
+	if len(baseURL) == 0 && len(rootapi.BasePath) == 0 {
+		rootapi.BasePath = s
+	}
+
 	for _, sp := range params {
 		switch pp := sp.(type) {
 		case *ast.CallExpr:
 			selname := pp.Fun.(*ast.SelectorExpr).Sel.String()
 			switch selname {
 			case "NSNamespace":
-				traverseNameSpace(baseURL+s, pp)
+				url := strings.Trim(pp.Args[0].(*ast.BasicLit).Value, `"`)
+				traverseNameSpace(baseURL+url, pp)
 			case "NSRouter":
-				routeURL := strings.Trim(pp.Args[0].(*ast.BasicLit).Value, "\"")
-				controllerName := analyseNSRouter(baseURL+s, routeURL, pp)
+				routeURL := strings.TrimRight(strings.Trim(pp.Args[0].(*ast.BasicLit).Value, "\""), "/")
+				controllerName := analyseNSRouter(baseURL, routeURL, pp)
 				if v, ok := controllerComments[controllerName]; ok {
+					tag := strings.Trim(baseURL, "/")
+					if len(tag) == 0 {
+						tag = "/"
+					}
 					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-						Name:        strings.Trim(baseURL+s, "/"),
+						Name:        tag,
 						Description: v,
 					})
 				}
 			case "NSInclude":
-				controllerName := analyseNSInclude(baseURL+s, pp)
+				controllerName := analyseNSInclude(baseURL, pp)
 				if v, ok := controllerComments[controllerName]; ok {
 					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
-						Name:        strings.Trim(baseURL+s, "/"),
+						Name:        strings.Trim(baseURL, "/"),
 						Description: v,
 					})
 				}
@@ -420,8 +453,11 @@ func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
 		for rt, item := range apis {
 			tag := cname
 			if baseurl+routeurl != "" {
-				rt = baseurl + routeurl + strings.TrimRight(rt, "/")
+				rt = baseurl + routeurl + rt
 				tag = strings.Trim(baseurl, "/")
+				if len(tag) == 0 {
+					tag = "/"
+				}
 			}
 
 			if item.Get != nil {
@@ -1005,24 +1041,28 @@ func getModel(fl *ast.File, str string) (definitionName string, m swagger.Schema
 	// Default all swagger schemas to object, if no other type is found
 	m.Type = astTypeObject
 
-	localPkgs := make([]*ast.Package, len(astPkgs))
-	copy(localPkgs, astPkgs)
-	parsePackageFromFile(&localPkgs, fl)
+	if _, ok := basicTypes[str]; ok {
+		m.Title = objectname
+	} else {
+		localPkgs := make([]*ast.Package, len(astPkgs))
+		copy(localPkgs, astPkgs)
+		parsePackageFromFile(&localPkgs, fl)
 
-L:
-	for _, pkg := range localPkgs {
-		if packageName == pkg.Name {
-			for _, fl := range pkg.Files {
-				for k, d := range fl.Scope.Objects {
-					if d.Kind == ast.Typ {
-						if k != objectname {
-							// Still searching for the right object
-							continue
+	L:
+		for _, pkg := range localPkgs {
+			if packageName == pkg.Name {
+				for _, fl := range pkg.Files {
+					for k, d := range fl.Scope.Objects {
+						if d.Kind == ast.Typ {
+							if k != objectname {
+								// Still searching for the right object
+								continue
+							}
+							parseObject(d, k, &m, &realTypes, fl, localPkgs, packageName)
+
+							// When we've found the correct object, we can stop searching
+							break L
 						}
-						parseObject(d, k, &m, &realTypes, fl, localPkgs, packageName)
-
-						// When we've found the correct object, we can stop searching
-						break L
 					}
 				}
 			}
@@ -1169,11 +1209,13 @@ func normalizeTypeName(packageName, typename string) string {
 }
 
 func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]string, astPkgs []*ast.Package, packageName string) {
-	m.Title = k
+	lm := &swagger.Schema{}
+	refs := make([]*swagger.Schema, 0)
 	if st.Fields.List != nil {
-		m.Properties = make(map[string]swagger.Propertie)
+		lm.Properties = make(map[string]swagger.Propertie)
+		lm.AllOf = make([]*swagger.Schema, 0)
 		for _, field := range st.Fields.List {
-			isSlice, realType, sType := typeAnalyser(field)
+			isSlice, realType, sType := typeAnalyser(packageName, field)
 			if (isSlice && isBasicType(realType)) || sType == astTypeObject {
 				realType = normalizeTypeName(packageName, realType)
 			}
@@ -1227,7 +1269,7 @@ func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]s
 
 				// if no tag skip tag processing
 				if field.Tag == nil {
-					m.Properties[name] = mp
+					lm.Properties[name] = mp
 					continue
 				}
 
@@ -1267,7 +1309,7 @@ func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]s
 						}
 					}
 					if required := stag.Get("required"); required != "" {
-						m.Required = append(m.Required, name)
+						lm.Required = append(lm.Required, name)
 					}
 					if desc := stag.Get("description"); desc != "" {
 						mp.Description = desc
@@ -1277,12 +1319,18 @@ func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]s
 						mp.Example = str2RealType(example, realType)
 					}
 
-					m.Properties[name] = mp
+					lm.Properties[name] = mp
 				}
 				if ignore := stag.Get("ignore"); ignore != "" {
 					continue
 				}
 			} else {
+				if sType == astTypeObject {
+					ref := &swagger.Schema{
+						Ref: "#/definitions/" + realType,
+					}
+					refs = append(refs, ref)
+				}
 				// only parse case of when embedded field is TypeName
 				// cases of *TypeName and Interface are not handled, maybe useless for swagger spec
 				tag := ""
@@ -1298,7 +1346,7 @@ func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]s
 						continue
 					} else {
 						//if json tag is "something", output: something #definition/pkgname.Type
-						m.Properties[tagValues[0]] = mp
+						lm.Properties[tagValues[0]] = mp
 						continue
 					}
 				} else {
@@ -1314,16 +1362,25 @@ func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]s
 						}
 					}
 					for name, p := range nm.Properties {
-						m.Properties[name] = p
+						lm.Properties[name] = p
 					}
 					continue
 				}
 			}
 		}
 	}
+
+	if len(refs) > 0 {
+		om := lm
+		lm = &swagger.Schema{}
+		lm.AllOf = append(refs, om)
+	}
+	b, _ := json.Marshal(lm)
+	_ = json.Unmarshal(b, m)
+	m.Title = k
 }
 
-func typeAnalyser(f *ast.Field) (isSlice bool, realType, swaggerType string) {
+func typeAnalyser(packageName string, f *ast.Field) (isSlice bool, realType, swaggerType string) {
 	if arr, ok := f.Type.(*ast.ArrayType); ok {
 		if isBasicType(fmt.Sprint(arr.Elt)) {
 			return true, fmt.Sprintf("[]%v", arr.Elt), basicTypes[fmt.Sprint(arr.Elt)]
@@ -1333,6 +1390,10 @@ func typeAnalyser(f *ast.Field) (isSlice bool, realType, swaggerType string) {
 		}
 		if star, ok := arr.Elt.(*ast.StarExpr); ok {
 			basicType := fmt.Sprint(star.X)
+			if _, ok := star.X.(*ast.StructType); ok {
+				beeLogger.Log.Warnf("Temporary structure is not supported: %s.%s", packageName, f.Names[0])
+				basicType = "json.RawMessage"
+			}
 			if object, isStdLibObject := stdlibObject[basicType]; isStdLibObject {
 				basicType = object
 			}
@@ -1344,8 +1405,22 @@ func typeAnalyser(f *ast.Field) (isSlice bool, realType, swaggerType string) {
 		return true, fmt.Sprint(arr.Elt), astTypeObject
 	}
 	switch t := f.Type.(type) {
+	case *ast.SelectorExpr:
+		basicType := fmt.Sprintf("%s.%s", t.X, t.Sel.Name)
+		if object, isStdLibObject := stdlibObject[basicType]; isStdLibObject {
+			basicType = object
+		}
+		if k, ok := basicTypes[basicType]; ok {
+			return false, basicType, k
+		}
+		return false, basicType, astTypeObject
 	case *ast.StarExpr:
 		basicType := fmt.Sprint(t.X)
+		if _, ok := t.X.(*ast.StructType); ok {
+			// Interface as Map
+			beeLogger.Log.Warnf("Temporary structure is not supported: %s.%s", packageName, f.Names[0])
+			basicType = "json.RawMessage"
+		}
 		if object, isStdLibObject := stdlibObject[basicType]; isStdLibObject {
 			basicType = object
 		}
