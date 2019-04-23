@@ -1,4 +1,4 @@
-package swaggergen
+package swagger
 
 // Swagger list the resource
 type Swagger struct {

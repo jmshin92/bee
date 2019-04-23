@@ -35,6 +35,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/astaxie/beego/utils"
+	"github.com/beego/bee/generate/swaggergen/swagger"
 	"github.com/beego/bee/logger"
 	bu "github.com/beego/bee/utils"
 )
@@ -56,9 +57,9 @@ const (
 var pkgCache map[string]struct{} //pkg:controller:function:comments comments: key:value
 var controllerComments map[string]string
 var importlist map[string]string
-var controllerList map[string]map[string]*Item //controllername Paths items
-var modelsList map[string]map[string]Schema
-var rootapi Swagger
+var controllerList map[string]map[string]*swagger.Item //controllername Paths items
+var modelsList map[string]map[string]swagger.Schema
+var rootapi swagger.Swagger
 var astPkgs []*ast.Package
 
 // refer to builtin.go
@@ -106,8 +107,8 @@ func init() {
 	pkgCache = make(map[string]struct{})
 	controllerComments = make(map[string]string)
 	importlist = make(map[string]string)
-	controllerList = make(map[string]map[string]*Item)
-	modelsList = make(map[string]map[string]Schema)
+	controllerList = make(map[string]map[string]*swagger.Item)
+	modelsList = make(map[string]map[string]swagger.Schema)
 	astPkgs = make([]*ast.Package, 0)
 }
 
@@ -166,19 +167,14 @@ func parsePackageFromDir(astPkgs *[]*ast.Package, path string) error {
 
 // GenerateDocs generates documentations for a given path.
 func GenerateDocs(curpath string) {
-	destPath := filepath.Join(curpath, "swagger")
-	generateDocs(curpath, destPath)
-}
-
-func generateDocs(curPath, destPath string) {
 	fset := token.NewFileSet()
 
-	f, err := parser.ParseFile(fset, filepath.Join(curPath, "routers", "router.go"), nil, parser.ParseComments)
+	f, err := parser.ParseFile(fset, filepath.Join(curpath, "routers", "router.go"), nil, parser.ParseComments)
 	if err != nil {
 		beeLogger.Log.Fatalf("Error while parsing router.go: %s", err)
 	}
 
-	rootapi.Infos = Information{}
+	rootapi.Infos = swagger.Information{}
 	rootapi.SwaggerVersion = "2.0"
 
 	// Analyse API comments
@@ -201,13 +197,13 @@ func generateDocs(curPath, destPath string) {
 					rootapi.Infos.Contact.URL = strings.TrimSpace(s[len("@URL"):])
 				} else if strings.HasPrefix(s, "@LicenseUrl") {
 					if rootapi.Infos.License == nil {
-						rootapi.Infos.License = &License{URL: strings.TrimSpace(s[len("@LicenseUrl"):])}
+						rootapi.Infos.License = &swagger.License{URL: strings.TrimSpace(s[len("@LicenseUrl"):])}
 					} else {
 						rootapi.Infos.License.URL = strings.TrimSpace(s[len("@LicenseUrl"):])
 					}
 				} else if strings.HasPrefix(s, "@License") {
 					if rootapi.Infos.License == nil {
-						rootapi.Infos.License = &License{Name: strings.TrimSpace(s[len("@License"):])}
+						rootapi.Infos.License = &swagger.License{Name: strings.TrimSpace(s[len("@License"):])}
 					} else {
 						rootapi.Infos.License.Name = strings.TrimSpace(s[len("@License"):])
 					}
@@ -219,9 +215,9 @@ func generateDocs(curPath, destPath string) {
 					rootapi.BasePath = strings.TrimSpace(s[len("@Base"):])
 				} else if strings.HasPrefix(s, "@SecurityDefinition") {
 					if len(rootapi.SecurityDefinitions) == 0 {
-						rootapi.SecurityDefinitions = make(map[string]Security)
+						rootapi.SecurityDefinitions = make(map[string]swagger.Security)
 					}
-					var out Security
+					var out swagger.Security
 					p := getparams(strings.TrimSpace(s[len("@SecurityDefinition"):]))
 					if len(p) < 2 {
 						beeLogger.Log.Fatalf("Not enough params for security: %d\n", len(p))
@@ -283,7 +279,7 @@ func generateDocs(curPath, destPath string) {
 			pkgRealPath := getPackageRealPath(pkgPath)
 			pkgName = getPackageRealName(pkgRealPath)
 		}
-		analyseControllerPkg(path.Join(curPath, "vendor"), pkgName, im.Path.Value)
+		analyseControllerPkg(path.Join(curpath, "vendor"), pkgName, im.Path.Value)
 	}
 	for _, d := range f.Decls {
 		switch specDecl := d.(type) {
@@ -310,12 +306,12 @@ func generateDocs(curPath, destPath string) {
 			}
 		}
 	}
-	os.Mkdir(path.Join(curPath, "swagger"), 0755)
-	fd, err := os.Create(path.Join(curPath, "swagger", "swagger.json"))
+	os.Mkdir(path.Join(curpath, "swagger"), 0755)
+	fd, err := os.Create(path.Join(curpath, "swagger", "swagger.json"))
 	if err != nil {
 		panic(err)
 	}
-	fdyml, err := os.Create(path.Join(curPath, "swagger", "swagger.yml"))
+	fdyml, err := os.Create(path.Join(curpath, "swagger", "swagger.yml"))
 	if err != nil {
 		panic(err)
 	}
@@ -383,7 +379,9 @@ func findBaseNamespace(url string, pp *ast.CallExpr) (string, *ast.CallExpr) {
 			case *ast.CallExpr:
 				selName := pp.Fun.(*ast.SelectorExpr).Sel.String()
 				if selName == "NSNamespace" {
-					return findBaseNamespace(url+s, pp)
+					if url, node := findBaseNamespace(url+s, pp); node != nil {
+						return url, node
+					}
 				}
 			}
 		}
@@ -413,7 +411,7 @@ func traverseNameSpace(baseURL string, nsExpr *ast.CallExpr) {
 					if len(tag) == 0 {
 						tag = "/"
 					}
-					rootapi.Tags = append(rootapi.Tags, Tag{
+					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
 						Name:        tag,
 						Description: v,
 					})
@@ -421,7 +419,7 @@ func traverseNameSpace(baseURL string, nsExpr *ast.CallExpr) {
 			case "NSInclude":
 				controllerName := analyseNSInclude(baseURL, pp)
 				if v, ok := controllerComments[controllerName]; ok {
-					rootapi.Tags = append(rootapi.Tags, Tag{
+					rootapi.Tags = append(rootapi.Tags, swagger.Tag{
 						Name:        strings.Trim(baseURL, "/"),
 						Description: v,
 					})
@@ -484,7 +482,7 @@ func appendController(x *ast.SelectorExpr, baseurl, routeurl string) string {
 				item.Options.Tags = []string{tag}
 			}
 			if len(rootapi.Paths) == 0 {
-				rootapi.Paths = make(map[string]*Item)
+				rootapi.Paths = make(map[string]*swagger.Item)
 			}
 			rt = urlReplace(rt)
 			rootapi.Paths[rt] = item
@@ -643,8 +641,8 @@ func peekNextSplitString(ss string) (s string, spacePos int) {
 func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath string) error {
 	var routerPath string
 	var HTTPMethod string
-	opts := Operation{
-		Responses: make(map[string]Response),
+	opts := swagger.Operation{
+		Responses: make(map[string]swagger.Response),
 	}
 	funcName := f.Name.String()
 	comments := f.Doc
@@ -680,7 +678,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				opts.Summary = strings.TrimSpace(t[len("@Summary"):])
 			} else if strings.HasPrefix(t, "@Success") {
 				ss := strings.TrimSpace(t[len("@Success"):])
-				rs := Response{}
+				rs := swagger.Response{}
 				respCode, pos := peekNextSplitString(ss)
 				ss = strings.TrimSpace(ss[pos:])
 				respType, pos := peekNextSplitString(ss)
@@ -695,7 +693,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 						schemaName = schemaName[2:]
 						isArray = true
 					}
-					schema := Schema{}
+					schema := swagger.Schema{}
 					if sType, ok := basicTypes[schemaName]; ok {
 						typeFormat := strings.Split(sType, ":")
 						schema.Type = typeFormat[0]
@@ -704,13 +702,13 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 						m, mod, realTypes := getModel(fl, schemaName)
 						schema.Ref = "#/definitions/" + m
 						if _, ok := modelsList[pkgpath+controllerName]; !ok {
-							modelsList[pkgpath+controllerName] = make(map[string]Schema)
+							modelsList[pkgpath+controllerName] = make(map[string]swagger.Schema)
 						}
 						modelsList[pkgpath+controllerName][schemaName] = mod
 						appendModels(fl, pkgpath, controllerName, realTypes)
 					}
 					if isArray {
-						rs.Schema = &Schema{
+						rs.Schema = &swagger.Schema{
 							Type:  astTypeArray,
 							Items: &schema,
 						}
@@ -723,7 +721,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				}
 				opts.Responses[respCode] = rs
 			} else if strings.HasPrefix(t, "@Param") {
-				para := Parameter{}
+				para := swagger.Parameter{}
 				p := getparams(strings.TrimSpace(t[len("@Param "):]))
 				if len(p) < 4 {
 					beeLogger.Log.Fatal(controllerName + "_" + funcName + "'s comments @Param should have at least 4 params")
@@ -764,20 +762,20 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 					}
 					m, mod, realTypes := getModel(fl, p[2])
 					if isArray {
-						para.Schema = &Schema{
+						para.Schema = &swagger.Schema{
 							Type: astTypeArray,
-							Items: &Schema{
+							Items: &swagger.Schema{
 								Ref: "#/definitions/" + m,
 							},
 						}
 					} else {
-						para.Schema = &Schema{
+						para.Schema = &swagger.Schema{
 							Ref: "#/definitions/" + m,
 						}
 					}
 
 					if _, ok := modelsList[pkgpath+controllerName]; !ok {
-						modelsList[pkgpath+controllerName] = make(map[string]Schema)
+						modelsList[pkgpath+controllerName] = make(map[string]swagger.Schema)
 					}
 					modelsList[pkgpath+controllerName][typ] = mod
 					appendModels(fl, pkgpath, controllerName, realTypes)
@@ -805,7 +803,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				}
 				opts.Parameters = append(opts.Parameters, para)
 			} else if strings.HasPrefix(t, "@Failure") {
-				rs := Response{}
+				rs := swagger.Response{}
 				st := strings.TrimSpace(t[len("@Failure"):])
 				var cd []rune
 				var start bool
@@ -856,7 +854,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 	if HTTPMethod != "" {
 		//Go over function parameters which were not mapped and create swagger params for them
 		for name, typ := range funcParamMap {
-			para := Parameter{}
+			para := swagger.Parameter{}
 			para.Name = name
 			setParamType(&para, typ, fl, pkgpath, controllerName)
 			if paramInPath(name, routerPath) {
@@ -867,16 +865,16 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 			opts.Parameters = append(opts.Parameters, para)
 		}
 
-		var item *Item
+		var item *swagger.Item
 		if itemList, ok := controllerList[pkgpath+controllerName]; ok {
 			if it, ok := itemList[routerPath]; !ok {
-				item = &Item{}
+				item = &swagger.Item{}
 			} else {
 				item = it
 			}
 		} else {
-			controllerList[pkgpath+controllerName] = make(map[string]*Item)
-			item = &Item{}
+			controllerList[pkgpath+controllerName] = make(map[string]*swagger.Item)
+			item = &swagger.Item{}
 		}
 		for _, hm := range strings.Split(HTTPMethod, ",") {
 			switch hm {
@@ -901,7 +899,7 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 	return nil
 }
 
-func setParamType(para *Parameter, typ string, fl *ast.File, pkgpath, controllerName string) {
+func setParamType(para *swagger.Parameter, typ string, fl *ast.File, pkgpath, controllerName string) {
 	isArray := false
 	paraType := ""
 	paraFormat := ""
@@ -919,28 +917,27 @@ func setParamType(para *Parameter, typ string, fl *ast.File, pkgpath, controller
 		paraFormat = typeFormat[1]
 	} else {
 		m, mod, realTypes := getModel(fl, typ)
-		para.Schema = &Schema{
+		para.Schema = &swagger.Schema{
 			Ref: "#/definitions/" + m,
 		}
 		if _, ok := modelsList[pkgpath+controllerName]; !ok {
-			modelsList[pkgpath+controllerName] = make(map[string]Schema)
+			modelsList[pkgpath+controllerName] = make(map[string]swagger.Schema)
 		}
-
 		modelsList[pkgpath+controllerName][typ] = mod
 		appendModels(fl, pkgpath, controllerName, realTypes)
 	}
 	if isArray {
 		if para.In == "body" {
-			para.Schema = &Schema{
+			para.Schema = &swagger.Schema{
 				Type: astTypeArray,
-				Items: &Schema{
+				Items: &swagger.Schema{
 					Type:   paraType,
 					Format: paraFormat,
 				},
 			}
 		} else {
 			para.Type = astTypeArray
-			para.Items = &ParameterItems{
+			para.Items = &swagger.ParameterItems{
 				Type:   paraType,
 				Format: paraFormat,
 			}
@@ -1032,16 +1029,16 @@ func getparams(str string) []string {
 	return r
 }
 
-func getModel(fl *ast.File, str string) (definitionName string, m Schema, realTypes []string) {
-	var objectname string
+func getModel(fl *ast.File, str string) (definitionName string, m swagger.Schema, realTypes []string) {
 	strs := strings.Split(str, ".")
 	// strs = [packageName].[objectName]
 	packageName := strs[0]
 	if len(strs) == 1 {
 		packageName = fl.Name.Name
 	}
+	objectname := strs[len(strs)-1]
+
 	// Default all swagger schemas to object, if no other type is found
-	objectname = strs[len(strs)-1]
 	m.Type = astTypeObject
 
 	if _, ok := basicTypes[str]; ok {
@@ -1081,13 +1078,13 @@ func getModel(fl *ast.File, str string) (definitionName string, m Schema, realTy
 		// TODO remove when all type have been supported
 	}
 	if len(rootapi.Definitions) == 0 {
-		rootapi.Definitions = make(map[string]Schema)
+		rootapi.Definitions = make(map[string]swagger.Schema)
 	}
 	rootapi.Definitions[str] = m
 	return str, m, realTypes
 }
 
-func parseObject(d *ast.Object, k string, m *Schema, realTypes *[]string, fl *ast.File, astPkgs []*ast.Package, packageName string) {
+func parseObject(d *ast.Object, k string, m *swagger.Schema, realTypes *[]string, fl *ast.File, astPkgs []*ast.Package, packageName string) {
 	ts, ok := d.Decl.(*ast.TypeSpec)
 	if !ok {
 		beeLogger.Log.Fatalf("Unknown type without TypeSec: %v", d)
@@ -1105,7 +1102,7 @@ func parseObject(d *ast.Object, k string, m *Schema, realTypes *[]string, fl *as
 			if _, ok := rootapi.Definitions[objectName]; !ok {
 				objectName, _, _ = getModel(fl, objectName)
 			}
-			m.Items = &Schema{
+			m.Items = &swagger.Schema{
 				Ref: "#/definitions/" + objectName,
 			}
 		}
@@ -1117,7 +1114,7 @@ func parseObject(d *ast.Object, k string, m *Schema, realTypes *[]string, fl *as
 }
 
 // parse as enum, in the package, find out all consts with the same type
-func parseIdent(st *ast.Ident, k string, m *Schema, astPkgs []*ast.Package) {
+func parseIdent(st *ast.Ident, k string, m *swagger.Schema, astPkgs []*ast.Package) {
 	m.Title = k
 	basicType := fmt.Sprint(st)
 	if object, isStdLibObject := stdlibObject[basicType]; isStdLibObject {
@@ -1211,30 +1208,30 @@ func normalizeTypeName(packageName, typename string) string {
 	return typename
 }
 
-func parseStruct(st *ast.StructType, k string, m *Schema, realTypes *[]string, astPkgs []*ast.Package, packageName string) {
-	lm := &Schema{}
-	refs := make([]*Schema, 0)
+func parseStruct(st *ast.StructType, k string, m *swagger.Schema, realTypes *[]string, astPkgs []*ast.Package, packageName string) {
+	lm := &swagger.Schema{}
+	refs := make([]*swagger.Schema, 0)
 	if st.Fields.List != nil {
-		lm.Properties = make(map[string]Propertie)
-		lm.AllOf = make([]*Schema, 0)
+		lm.Properties = make(map[string]swagger.Propertie)
+		lm.AllOf = make([]*swagger.Schema, 0)
 		for _, field := range st.Fields.List {
 			isSlice, realType, sType := typeAnalyser(packageName, field)
 			if (isSlice && isBasicType(realType)) || sType == astTypeObject {
 				realType = normalizeTypeName(packageName, realType)
 			}
 			*realTypes = append(*realTypes, realType)
-			mp := Propertie{}
+			mp := swagger.Propertie{}
 			isObject := false
 			if isSlice {
 				mp.Type = astTypeArray
 				if t, ok := basicTypes[(strings.Replace(realType, "[]", "", -1))]; ok {
 					typeFormat := strings.Split(t, ":")
-					mp.Items = &Propertie{
+					mp.Items = &swagger.Propertie{
 						Type:   typeFormat[0],
 						Format: typeFormat[1],
 					}
 				} else {
-					mp.Items = &Propertie{
+					mp.Items = &swagger.Propertie{
 						Ref: "#/definitions/" + realType,
 					}
 				}
@@ -1253,12 +1250,12 @@ func parseStruct(st *ast.StructType, k string, m *Schema, realTypes *[]string, a
 						// map[string]object
 						valType := normalizeTypeName(packageName, typeFormat[1])
 						*realTypes = append(*realTypes, valType)
-						mp.AdditionalProperties = &Propertie{
+						mp.AdditionalProperties = &swagger.Propertie{
 							Ref: "#/definitions/" + valType,
 						}
 					} else {
 						// map[string]basicType
-						mp.AdditionalProperties = &Propertie{
+						mp.AdditionalProperties = &swagger.Propertie{
 							Type:   typeFormat[0],
 							Format: typeFormat[1],
 						}
@@ -1329,7 +1326,7 @@ func parseStruct(st *ast.StructType, k string, m *Schema, realTypes *[]string, a
 				}
 			} else {
 				if sType == astTypeObject {
-					ref := &Schema{
+					ref := &swagger.Schema{
 						Ref: "#/definitions/" + realType,
 					}
 					refs = append(refs, ref)
@@ -1354,7 +1351,7 @@ func parseStruct(st *ast.StructType, k string, m *Schema, realTypes *[]string, a
 					}
 				} else {
 					//if no json tag, expand all fields of the type here
-					nm := &Schema{}
+					nm := &swagger.Schema{}
 					for _, pkg := range astPkgs {
 						for _, fl := range pkg.Files {
 							for nameOfObj, obj := range fl.Scope.Objects {
@@ -1375,7 +1372,7 @@ func parseStruct(st *ast.StructType, k string, m *Schema, realTypes *[]string, a
 
 	if len(refs) > 0 {
 		om := lm
-		lm = &Schema{}
+		lm = &swagger.Schema{}
 		lm.AllOf = append(refs, om)
 	}
 	b, _ := json.Marshal(lm)
