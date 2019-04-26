@@ -785,22 +785,28 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 					}
 					setParamType(&para, typ, fl, pkgpath, controllerName)
 				}
-				var paramDesc string
-				switch len(p) {
-				case 5:
-					para.Required, _ = strconv.ParseBool(p[3])
-					paramDesc = strings.Trim(p[4], `" `)
-				case 6:
-					para.Default = str2RealType(p[3], para.Type)
-					para.Required, _ = strconv.ParseBool(p[4])
-					paramDesc = strings.Trim(p[5], `" `)
-				default:
-					paramDesc = strings.Trim(p[3], `" `)
-				}
+				para.Required, _ = strconv.ParseBool(p[3])
+				para.AllowEmptyValue = !para.Required
+				paramDesc := strings.Trim(p[4], `" `)
 				lines := strings.Split(paramDesc, `\n`)
 				for _, line := range lines {
 					para.Description = fmt.Sprintf("%s\n%s", para.Description, line)
 				}
+
+				if len(p) >= 6 {
+					para.Default = str2RealType(p[5], para.Type)
+				}
+
+				if len(p) >= 7 {
+					values := strings.Split(p[6], ":")
+					if len(values) > 0 {
+						para.Enum = make([]interface{}, 0, len(values))
+					}
+					for _, value := range values {
+						para.Enum = append(para.Enum, value)
+					}
+				}
+
 				opts.Parameters = append(opts.Parameters, para)
 			} else if strings.HasPrefix(t, "@Failure") {
 				rs := swagger.Response{}

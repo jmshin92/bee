@@ -70,15 +70,17 @@ type Operation struct {
 
 // Parameter Describes a single operation parameter.
 type Parameter struct {
-	In          string          `json:"in,omitempty" yaml:"in,omitempty"`
-	Name        string          `json:"name,omitempty" yaml:"name,omitempty"`
-	Description string          `json:"description,omitempty" yaml:"description,omitempty"`
-	Required    bool            `json:"required,omitempty" yaml:"required,omitempty"`
-	Schema      *Schema         `json:"schema,omitempty" yaml:"schema,omitempty"`
-	Type        string          `json:"type,omitempty" yaml:"type,omitempty"`
-	Format      string          `json:"format,omitempty" yaml:"format,omitempty"`
-	Items       *ParameterItems `json:"items,omitempty" yaml:"items,omitempty"`
-	Default     interface{}     `json:"default,omitempty" yaml:"default,omitempty"`
+	In              string          `json:"in,omitempty" yaml:"in,omitempty"`
+	Name            string          `json:"name,omitempty" yaml:"name,omitempty"`
+	Description     string          `json:"description,omitempty" yaml:"description,omitempty"`
+	Required        bool            `json:"required,omitempty" yaml:"required,omitempty"`
+	Schema          *Schema         `json:"schema,omitempty" yaml:"schema,omitempty"`
+	Type            string          `json:"type,omitempty" yaml:"type,omitempty"`
+	Format          string          `json:"format,omitempty" yaml:"format,omitempty"`
+	Items           *ParameterItems `json:"items,omitempty" yaml:"items,omitempty"`
+	AllowEmptyValue bool            `json:"allowEmptyValue,omitempty" yaml:"allowEmptyValue,omitempty"`
+	Default         interface{}     `json:"default,omitempty" yaml:"default,omitempty"`
+	Enum            []interface{}   `json:"enum,omitempty" yaml:"enum,omitempty"`
 }
 
 // ParameterItems A limited subset of JSON-Schema's items object. It is used by parameter definitions that are not located in "body".
