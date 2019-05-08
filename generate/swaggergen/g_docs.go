@@ -654,6 +654,9 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 
 	//TODO: resultMap := buildParamMap(f.Type.Results)
 	if comments != nil && comments.List != nil {
+		if len(comments.List) == 0 {
+			return nil
+		}
 		for _, c := range comments.List {
 			t := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
 			if strings.HasPrefix(t, "@router") {
@@ -855,6 +858,8 @@ func parserComments(fl *ast.File, f *ast.FuncDecl, controllerName, pkgpath strin
 				opts.Security = append(opts.Security, getSecurity(t))
 			}
 		}
+	} else {
+		return nil
 	}
 
 	if HTTPMethod != "" {
